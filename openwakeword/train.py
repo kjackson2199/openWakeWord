@@ -645,6 +645,16 @@ if __name__ == '__main__':
     sys.path.insert(0, os.path.abspath(config["piper_sample_generator_path"]))
     from generate_samples import generate_samples
 
+    PIPER_MODEL = config.get(
+        "piper_tts_model_path",
+        os.path.join(config["piper_sample_generator_path"], "models", "en_US-libritts_r-medium.pt")
+    )
+    if not os.path.exists(PIPER_MODEL):
+        raise FileNotFoundError(
+            f"Piper model not found at: {PIPER_MDOEL}\n"
+            "Download it into piper-sample-generator/models or set piper_tts_model_path in the YAML."
+        )
+
     # Define output locations
     config["output_dir"] = os.path.abspath(config["output_dir"])
     if not os.path.exists(config["output_dir"]):
@@ -678,7 +688,8 @@ if __name__ == '__main__':
                 batch_size=config["tts_batch_size"],
                 noise_scales=[0.98], noise_scale_ws=[0.98], length_scales=[0.75, 1.0, 1.25],
                 output_dir=positive_train_output_dir, auto_reduce_batch_size=True,
-                file_names=[uuid.uuid4().hex + ".wav" for i in range(config["n_samples"])]
+                file_names=[uuid.uuid4().hex + ".wav" for i in range(config["n_samples"])],
+                model=PIPER_MODEL
             )
             torch.cuda.empty_cache()
         else:
@@ -693,7 +704,7 @@ if __name__ == '__main__':
             generate_samples(text=config["target_phrase"], max_samples=config["n_samples_val"]-n_current_samples,
                              batch_size=config["tts_batch_size"],
                              noise_scales=[1.0], noise_scale_ws=[1.0], length_scales=[0.75, 1.0, 1.25],
-                             output_dir=positive_test_output_dir, auto_reduce_batch_size=True)
+                             output_dir=positive_test_output_dir, auto_reduce_batch_size=True, model=PIPER_MODEL)
             torch.cuda.empty_cache()
         else:
             logging.warning(f"Skipping generation of positive clips testing, as ~{config['n_samples_val']} already exist")
@@ -715,7 +726,8 @@ if __name__ == '__main__':
                              batch_size=config["tts_batch_size"]//7,
                              noise_scales=[0.98], noise_scale_ws=[0.98], length_scales=[0.75, 1.0, 1.25],
                              output_dir=negative_train_output_dir, auto_reduce_batch_size=True,
-                             file_names=[uuid.uuid4().hex + ".wav" for i in range(config["n_samples"])]
+                             file_names=[uuid.uuid4().hex + ".wav" for i in range(config["n_samples"])],
+                             model=PIPER_MODEL
                              )
             torch.cuda.empty_cache()
         else:
@@ -737,7 +749,7 @@ if __name__ == '__main__':
             generate_samples(text=adversarial_texts, max_samples=config["n_samples_val"]-n_current_samples,
                              batch_size=config["tts_batch_size"]//7,
                              noise_scales=[1.0], noise_scale_ws=[1.0], length_scales=[0.75, 1.0, 1.25],
-                             output_dir=negative_test_output_dir, auto_reduce_batch_size=True)
+                             output_dir=negative_test_output_dir, auto_reduce_batch_size=True, model=PIPER_MODEL)
             torch.cuda.empty_cache()
         else:
             logging.warning(f"Skipping generation of negative clips for testing, as ~{config['n_samples_val']} already exist")
