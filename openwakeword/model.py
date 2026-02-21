@@ -25,7 +25,7 @@ import pickle
 from collections import deque, defaultdict
 from functools import partial
 import time
-from typing import List, Union, DefaultDict, Dict
+from typing import List, Union, DefaultDict, Dict, Optional
 
 
 # Define main model class
@@ -44,6 +44,7 @@ class Model():
             custom_verifier_models: dict = {},
             custom_verifier_threshold: float = 0.1,
             inference_framework: str = "tflite",
+            onnx_providers: Optional[List[str]] = None,
             **kwargs
             ):
         """Initialize the openWakeWord model object.
@@ -78,6 +79,9 @@ class Model():
                                        "tflite" or "onnx". The default is "tflite" as this results in better
                                        efficiency on common platforms (x86, ARM64), but in some deployment
                                        scenarios ONNX models may be preferable.
+            onnx_providers (List[str] | None): Optional list of ONNX Runtime execution providers to use
+                                               for wakeword models when using the ONNX inference framework.
+                                               Defaults to CUDA if available, otherwise CPU-only.
             kwargs (dict): Any other keyword arguments to pass the the preprocessor instance
         """
         # Get model paths for pre-trained models if user doesn't provide models to load
@@ -140,6 +144,8 @@ class Model():
             except ImportError:
                 raise ValueError("Tried to import onnxruntime, but it was not found. Please install it using `pip install onnxruntime`")
 
+        logged_providers = False
+        available_providers = None
         for mdl_path, mdl_name in zip(wakeword_models, wakeword_model_names):
             # Load openwakeword models
             if inference_framework == "onnx":
@@ -150,8 +156,46 @@ class Model():
                 sessionOptions.inter_op_num_threads = 1
                 sessionOptions.intra_op_num_threads = 1
 
-                self.models[mdl_name] = ort.InferenceSession(mdl_path, sess_options=sessionOptions,
-                                                             providers=["CPUExecutionProvider"])
+                if onnx_providers is not None:
+                    providers = list(onnx_providers)
+                else:
+                    if available_providers is None:
+                        available_providers = ort.get_available_providers()
+                    available = set(available_providers)
+                    if "CUDAExecutionProvider" in available:
+                        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+                    else:
+                        providers = ["CPUExecutionProvider"]
+
+                try:
+                    session = ort.InferenceSession(
+                        mdl_path,
+                        sess_options=sessionOptions,
+                        providers=providers,
+                    )
+                except Exception as exc:
+                    if providers != ["CPUExecutionProvider"]:
+                        logging.warning(
+                            "Failed to init ONNX session with providers %s; falling back to CPU. Error: %s",
+                            providers,
+                            exc,
+                        )
+                        session = ort.InferenceSession(
+                            mdl_path,
+                            sess_options=sessionOptions,
+                            providers=["CPUExecutionProvider"],
+                        )
+                    else:
+                        raise
+
+                if not logged_providers:
+                    if available_providers is None:
+                        available_providers = ort.get_available_providers()
+                    logging.info("ONNX Runtime available providers: %s", available_providers)
+                    logging.info("Wakeword ONNX session providers: %s", session.get_providers())
+                    logged_providers = True
+
+                self.models[mdl_name] = session
 
                 self.model_inputs[mdl_name] = self.models[mdl_name].get_inputs()[0].shape[1]
                 self.model_outputs[mdl_name] = self.models[mdl_name].get_outputs()[0].shape[1]
